@@ -1,0 +1,17 @@
+{
+    "geometry" : {
+        "sphere_radius" : 0.5,
+        "epsilon" : [ 0.0, 0.5, 2.0, 0.110102051],
+        "epsilon_notes" : [[ 0.0, 0.5, 2.0, 0.110102051],"wing",
+                        [ 0.0, 1.3, 1.25, 0.6],"ellipsoid"],
+        "zeta_0" : [ 0.0, -0.1, 0.0, 0.1],
+        "zeta_0_notes" : [[ 0.0, -0.1, 0.0, 0.1],"wing",
+                        [ 0.0, 0.0, 0.0, 0.0],"ellipsoid"],
+        "theta_nodes" : 100,
+        "phi_nodes" : 100
+    },
+    "run_commands" : {
+        "show_region" : true,
+        "create_stl" : false
+    }
+}
