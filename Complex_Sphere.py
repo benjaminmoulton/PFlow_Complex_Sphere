@@ -1,5 +1,4 @@
 import numpy as np
-from stl import mesh as stl_mesh
 import json
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -82,8 +81,7 @@ class sphere:
         # store geometry input values
         geometry = self.input_dict.get("geometry",{})
         self.sphere_radius = geometry.get("sphere_radius",2.0)
-        self.epsilon = np.array(geometry.get("epsilon",[0.0,0.5,0.5,0.5])) * \
-            2. * self.sphere_radius
+        self.vlambda = np.array(geometry.get("lambda",[0.0,0.5,0.5,0.5]))
         self.zeta0 = np.array(geometry.get("zeta_0",[0.0,0.0,0.0,0.0])) * \
             2. * self.sphere_radius
         self.n_theta = geometry.get("theta_nodes",10)
@@ -151,15 +149,16 @@ class sphere:
         omega = self.sphere_radius * np.cos(phi) + self.zeta0[3]
 
         mag = mu**2. + chi**2. + psi**2. + omega**2.
-        Rn = (self.sphere_radius - self.epsilon*2.*self.sphere_radius)**2.0
+        Rn = self.vlambda
+        # print((self.sphere_radius - self.vlambda*2.*self.sphere_radius)**2.)
         Np = 1. + Rn / mag
         Nm = 1. - Rn / mag
 
         return np.array([ mu*Np[0], chi*Nm[1], psi*Nm[2], omega*Nm[3]])
 
 
-    def geometry_3D_Joukowsky(self,theta,phi):
-        """Determines the geometry at (a) given theta and phi location.
+    def singularity_sphere(self,theta,phi):
+        """Determines the singularity point at (a) given theta and phi location
 
         Parameters
         ----------
@@ -172,21 +171,35 @@ class sphere:
         Returns
         -------
         point : quaternion
-            Geometry quaternion coordinate in [m,x,y,z] format.
+            Geometry quaternion coordinate in [mu,chi,psi,omega] format.
         """
 
         # defines coordinate values
-        mu = self.zeta0[0]
-        chi = 2. / 5. * (1. - 1. / self.sphere_radius**5.) * \
-            self.sphere_radius**2. * (-1. + 3. * np.sin(phi)) + self.zeta0[1]
-        psi = 4. / 5. * (1. + 3. / 2. / self.sphere_radius**5.) * \
-            self.sphere_radius**2. * np.sin(phi) * np.cos(phi) * np.cos(theta)\
-                + self.zeta0[2]
-        omega = 4. / 5. * (1. + 3. / 2. / self.sphere_radius**5.) * \
-            self.sphere_radius**2. * np.sin(phi) * np.cos(phi) * np.sin(theta)\
-                + self.zeta0[3]
+        m = self.zeta0[0]
+        c = self.sphere_radius * np.cos(theta) * np.sin(phi) + self.zeta0[1]
+        p = self.sphere_radius * np.sin(theta) * np.sin(phi) + self.zeta0[2]
+        o = self.sphere_radius * np.cos(phi) + self.zeta0[3]
 
-        return np.array([ mu, chi, psi, omega])
+        # define lambda values
+        lm = self.vlambda[0]
+        lc = self.vlambda[1]
+        lp = self.vlambda[2]
+        lo = self.vlambda[3]
+
+        # determine delta values
+        mi = 1. / (m**2. + c**2. + p**2. + o**2.)
+        dm = mi * (lm*m - lc*c - lp*p - lo*o)
+        dc = mi * (lm*c + lc*m + lp*o - lo*p)
+        dp = mi * (lm*p - lc*o + lp*m + lo*c)
+        do = mi * (lm*o + lc*p - lp*c + lo*m)
+
+        # determine nu values
+        nm = ( ( dm + (dm**2. + dc**2. + dp**2. + do**2.)**0.5 ) / 2. )**0.5
+        nc = dc / 2. / nm
+        nps = dp / 2. / nm
+        no = do / 2. / nm
+
+        return -2. * np.array([nm, nc, nps, no])
 
 
     def create_geometry(self):
@@ -201,7 +214,8 @@ class sphere:
         # initialize geometry 2d arrays
         sphere = np.zeros((self.n_theta,self.n_phi,4))
         ellipsoid = np.zeros((self.n_theta,self.n_phi,4))
-        # jouk = np.zeros((self.n_theta,self.n_phi,4))
+        # oops = np.zeros((self.n_theta,self.n_phi,4))
+        sin_sphere = np.zeros((self.n_theta,self.n_phi,4))
 
         for i in range(self.n_theta):
             for j in range(self.n_phi):
@@ -209,17 +223,23 @@ class sphere:
 
                 ellipsoid[i,j] = self.geometry_ellipsoid(theta[i],phi[j])
 
-                # jouk[i,j] = self.geometry_3D_Joukowsky(theta[i],phi[j])
+                # oops[i,j] = self.geometry_elloopsoid(theta[i],phi[j])
+
+                sin_sphere[i,j] = self.singularity_sphere(theta[i],phi[j])
         
         # save these geometry arrays globally
         self.sphere = sphere
         self.ellipsoid = ellipsoid
-        # self.jouk = jouk
-        
+        # self.oops = oops
+        self.sin_sphere = sin_sphere
+    
 
     def region(self):
         """Plot a sphere.
         """
+
+        # report
+        print("Plotting Region...\n")
 
         # plot a 3d plot of the wing
         fig = plt.figure()
@@ -250,14 +270,6 @@ class sphere:
                 if self.ellipsoid[i,j,3] < zmin: zmin = self.ellipsoid[i,j,3]
                 if self.ellipsoid[i,j,3] > zmax: zmax = self.ellipsoid[i,j,3]
 
-                # determine maxs and mins of jouk shape
-                # if self.jouk[i,j,1] < xmin: xmin = self.jouk[i,j,1]
-                # if self.jouk[i,j,1] > xmax: xmax = self.jouk[i,j,1]
-                # if self.jouk[i,j,2] < ymin: ymin = self.jouk[i,j,2]
-                # if self.jouk[i,j,2] > ymax: ymax = self.jouk[i,j,2]
-                # if self.jouk[i,j,3] < zmin: zmin = self.jouk[i,j,3]
-                # if self.jouk[i,j,3] > zmax: zmax = self.jouk[i,j,3]
-
         # plot origin
         axe.scatter([0],[0],[0],zdir=face,c="k")
 
@@ -278,6 +290,20 @@ class sphere:
         for j in range(self.n_phi):
             axe.plot(self.sphere[:,j,1],self.sphere[:,j,2],\
                 self.sphere[:,j,3],zdir=face,c="k")
+        
+        for i in range(self.n_theta):
+            for j in range(self.n_phi):
+                axe.scatter(self.sin_sphere[i,j,1],self.sin_sphere[i,j,2],\
+                    self.sin_sphere[i,j,3],c="k")
+
+        for i in range(self.n_theta):
+            axe.plot(self.sin_sphere[i,:,1],self.sin_sphere[i,:,2],\
+                self.sin_sphere[i,:,3],zdir=face,c="r")
+
+        for j in range(self.n_phi):
+            axe.plot(self.sin_sphere[:,j,1],self.sin_sphere[:,j,2],\
+                self.sin_sphere[:,j,3],zdir=face,c="r")
+
 
         # plot the ellipsoid
         for i in range(self.n_theta):
@@ -287,15 +313,6 @@ class sphere:
         for j in range(self.n_phi):
             axe.plot(self.ellipsoid[:,j,1],self.ellipsoid[:,j,2],\
                 self.ellipsoid[:,j,3],zdir=face,c="b")
-
-        # plot the jouk3
-        # for i in range(self.n_theta):
-        #     axe.plot(self.jouk[i,:,1],self.jouk[i,:,2],\
-        #        self.jouk[i,:,3],zdir=face,c="r")
-
-        # for j in range(self.n_phi):
-        #     axe.plot(self.jouk[:,j,1],self.jouk[:,j,2],\
-        #        self.jouk[:,j,3],zdir=face,c="r")
 
         # solve for center
         xcent = (xmax + xmin) / 2.
@@ -340,6 +357,9 @@ class sphere:
         
         Returns
         -------
+        normals : array
+            An array of the face normals.
+        
         vertices : array
             An array of vertices for the object.
 
@@ -421,15 +441,99 @@ class sphere:
                 int((self.n_phi - 2))])
         k += 1
 
-        return vertices, faces
+        # create normals array
+        normals = np.zeros((self.n_faces,3))
 
+        # run through and create each normal
+        for i in range(self.n_faces):
+
+            # create point vectors
+            vec2 = vertices[int(faces[i,1])] - vertices[int(faces[i,0])]
+            vec1 = vertices[int(faces[i,2])] - vertices[int(faces[i,0])]
+
+            # cross vectors
+            normal = np.cross(vec1,vec2)
+            first = normal
+
+            # make unit vector
+            normals[i] = normal / np.linalg.norm(normal)
+
+
+        return normals, vertices, faces
+
+
+    def write_stl(self,normals,vertices,faces,file_name):
+        """Method which writes the stl file for export.
+
+        Parameters:
+        normals : array
+            An array of the face normals.
         
+        vertices : array
+            An array of vertices for the object.
+
+        faces : array
+            A 2D array of indices referencing the vertices to create faces.
+        
+        file_name : string
+            The file name to create. ex. 'sphere.stl'
+        """
+
+        # write to file
+        with open(file_name,"w") as f:
+
+            # write solid intro
+            f.write("solid " + file_name[:-4] + "\n")
+
+            # write each triangle
+            for i in range(faces.shape[0]):
+
+                # write facet intro
+                f.write("\tfacet normal")
+
+                # write facet normal
+                for j in range(3):
+                    val = np.format_float_scientific(normals[i,j],\
+                        unique=False,trim="k",pad_left=3,precision=6,\
+                            exp_digits=3)
+                    f.write(val)
+                f.write("\n")
+
+                # write loop intro
+                f.write("\t\touter loop\n")
+
+                # write each vertex
+                for j in range(3):
+
+                    f.write("\t\t\tvertex\t")
+
+                    # write each coordinate
+                    for k in range(3):
+                        val = np.format_float_scientific(\
+                            vertices[int(faces[i,j]),k],unique=False,\
+                                trim="k",pad_left=3,precision=6,exp_digits=3)
+                        f.write(val)
+                    f.write("\n")
+
+                # write loop outro
+                f.write("\t\tendloop\n")
+
+                # write facet intro
+                f.write("\tendfacet \n")
+
+            # write solid outro
+            f.write("endsolid " + file_name[:-4] + "\n")
+
+            # close file
+            f.close()
+
+
     def export_stl(self):
         """Method which exports the stl  of the sphere and ellipsoid
         """
 
         # report
-        print("Creating and exporting sphere object as sphere.stl...")
+        print("Creating and exporting sphere object as sphere.stl...\n")
 
         # calculate number of vertices
         self.n_vertices = self.n_phi + (self.n_phi - 2) * (self.n_theta - 2)
@@ -438,30 +542,16 @@ class sphere:
         self.n_faces = (2 * (self.n_phi - 2) ) * (self.n_theta - 1)
 
         # create sphere object
-        sphere_vertices, sphere_faces = self.make_stl(self.sphere)
+        sphere_normals,sphere_vertices,sphere_faces= self.make_stl(self.sphere)
 
-        # Create the mesh
-        cube = stl_mesh.Mesh(np.zeros(sphere_faces.shape[0], \
-            dtype=stl_mesh.Mesh.dtype))
-        for i, f in enumerate(sphere_faces):
-            for j in range(3):
-                cube.vectors[i][j] = sphere_vertices[int(f[j]),:]
+        # write stl file
+        self.write_stl(sphere_normals, sphere_vertices, sphere_faces, \
+            "sphere.stl")
 
-        # Write the mesh to file "sphere.stl"
-        cube.save('sphere.stl')       
+        # create ellipsoid object
+        ellipsoid_normals, ellipsoid_vertices, ellipsoid_faces = \
+            self.make_stl(self.ellipsoid)
 
-        # report
-        print("Creating and exporting ellipsoid object as ellipsoid.stl...")
-
-        # create sphere object
-        ellipsoid_vertices, ellipsoid_faces = self.make_stl(self.ellipsoid)
-
-        # Create the mesh
-        cube = stl_mesh.Mesh(np.zeros(ellipsoid_faces.shape[0], \
-            dtype=stl_mesh.Mesh.dtype))
-        for i, f in enumerate(ellipsoid_faces):
-            for j in range(3):
-                cube.vectors[i][j] = ellipsoid_vertices[int(f[j]),:]
-
-        # Write the mesh to file "ellipsoid.stl"
-        cube.save('ellipsoid.stl')   
+        # write stl file
+        self.write_stl(ellipsoid_normals, ellipsoid_vertices, \
+            ellipsoid_faces,"ellipsoid.stl") 
